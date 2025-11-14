@@ -6,13 +6,18 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: write
+  pages: write
+  deployments: write
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pages: write
-      id-token: write
+      deployments: write
 
     steps:
       - name: Checkout repository
@@ -31,10 +36,23 @@ jobs:
 
       - name: Build frontend
         working-directory: frontend
-        run: yarn build
+        env:
+          VITE_BASE_PATH: /ns-ens-playground/
+        run: yarn build --logLevel info
+      
+      - name: Verify build output
+        run: | 
+          if [ ! -d "frontend/dist" ]; then
+            echo "Build output directory 'frontend/dist' does not exist."
+            exit 1
+          fi
+          echo "Build output directory exists."
+          ls -la frontend/dist/
+
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
+        id: deployment
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: frontend/dist
