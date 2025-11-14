@@ -1,0 +1,116 @@
+name: PR Preview Deploy
+
+on:
+    pull_request:
+        branches:
+            - main
+        types: [opened, synchronize, reopened]
+
+permissions:
+    contents: read
+    pull-requests: write
+    deployments: write
+
+jobs:
+    build-and-deploy:
+        runs-on: ubuntu-latest
+        
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                    node-version: '20'
+                    cache: 'yarn'
+                    cache-dependency-path: frontend/yarn.lock
+
+            - name: Install dependencies
+              working-directory: frontend
+              run: yarn install --frozen-lockfile
+
+            - name: Build frontend
+              working-directory: frontend
+              run: yarn build
+            - name: Create deployment
+              uses: chrnorm/deployment-action@v2
+              id: deployment
+              with:
+                    token: ${{ secrets.GITHUB_TOKEN }}
+                    environment: pr-${{ github.event.pull_request.number }}
+                    environment-url: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/pr-${{ github.event.pull_request.number }}
+
+            - name: Deploy to GitHub Pages (PR preview)
+              uses: peaceiris/actions-gh-pages@v4
+              with:
+                    github_token: ${{ secrets.GITHUB_TOKEN }}
+                    publish_dir: ./frontend/dist
+                    destination_dir: pr-${{ github.event.pull_request.number }}
+                    keep_files: false
+
+            - name: Update deployment status (success)
+              if: success()
+              uses: chrnorm/deployment-status@v2
+              with:
+                    token: ${{ secrets.GITHUB_TOKEN }}
+                    deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+                    state: success
+                    environment-url: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/pr-${{ github.event.pull_request.number }}
+
+            - name: Update deployment status (failure)
+              if: failure()
+              uses: chrnorm/deployment-status@v2
+              with:
+                    token: ${{ secrets.GITHUB_TOKEN }}
+                    deployment-id: ${{ steps.deployment.outputs.deployment_id }}
+                    state: failure
+
+            - name: Comment PR with preview URL
+              uses: actions/github-script@v7
+              with:
+                    script: |
+                        github.rest.issues.createComment({
+                            issue_number: context.issue.number,
+                            owner: context.repo.owner,
+                            repo: context.repo.repo,
+                            body: `🚀 Preview deployment ready!\n\n**URL:** https://${context.repo.owner}.github.io/${context.repo.repo}/pr-${context.issue.number}\n\nThis preview will be automatically removed when the PR is closed or merged.`
+                        })
+
+    cleanup:
+        runs-on: ubuntu-latest
+        if: github.event.pull_request.state == 'closed'
+        
+        steps:
+            - name: Checkout gh-pages branch
+              uses: actions/checkout@v4
+              with:
+                    ref: gh-pages
+
+            - name: Remove PR preview directory
+              run: |
+                    rm -rf pr-${{ github.event.pull_request.number }}
+                    git config user.name "github-actions[bot]"
+                    git config user.email "github-actions[bot]@users.noreply.github.com"
+                    git add .
+                    git commit -m "Remove preview for PR #${{ github.event.pull_request.number }}" || echo "Nothing to clean up"
+                    git push origin gh-pages
+
+            - name: Deactivate deployment
+              uses: actions/github-script@v7
+              with:
+                    script: |
+                        const deployments = await github.rest.repos.listDeployments({
+                            owner: context.repo.owner,
+                            repo: context.repo.repo,
+                            environment: `pr-${context.issue.number}`
+                        });
+                        
+                        for (const deployment of deployments.data) {
+                            await github.rest.repos.createDeploymentStatus({
+                                owner: context.repo.owner,
+                                repo: context.repo.repo,
+                                deployment_id: deployment.id,
+                                state: 'inactive'
+                            });
+                        }
