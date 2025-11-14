@@ -7,7 +7,8 @@ on:
         types: [opened, synchronize, reopened]
 
 permissions:
-    contents: read
+    contents: write
+    actions: read
     pull-requests: write
     deployments: write
 
