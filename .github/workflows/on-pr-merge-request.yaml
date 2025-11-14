@@ -33,7 +33,22 @@ jobs:
 
             - name: Build frontend
               working-directory: frontend
-              run: yarn build
+              env:
+                    VITE_BASE_PATH: /ns-ens-playground/pr-${{ github.event.pull_request.number }}/
+              run: |
+                    echo "Building with base path: $VITE_BASE_PATH"
+                    yarn build --logLevel info
+                    echo "Build completed. Listing dist contents:"
+                    ls -la dist/
+            
+            - name: Verify build output
+              working-directory: frontend
+              run: |
+                    echo "Checking index.html for correct asset paths:"
+                    cat dist/index.html
+                    echo ""
+                    echo "Listing all files in dist:"
+                    find dist -type f
             - name: Create deployment
               uses: chrnorm/deployment-action@v2
               id: deployment
